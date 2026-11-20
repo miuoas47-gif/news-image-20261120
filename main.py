@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import functools
+import hashlib
 import http.server
 import os
 import shutil
@@ -211,14 +212,35 @@ def run_check(root: str) -> int:
     return 1 if failed else 0
 
 
+def _sha256(path: str) -> str:
+    """Hex digest of a file, read in blocks."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for block in iter(lambda: handle.read(65536), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
 def run_entry(root: str) -> int:
-    """The grader's path: copy entry.png to the output directory, exit 0."""
+    """The grader's path: copy entry.png to the output directory, exit 0.
+
+    The copy is verified byte for byte: the destination's sha256 must
+    match the source's, so a truncated or partial write is caught here
+    instead of silently reaching the judge.
+    """
     source = entry_path(root)
     output_dir = os.environ.get(OUTPUT_ENV_VAR, OUTPUT_DEFAULT)
     os.makedirs(output_dir, exist_ok=True)
     destination = os.path.join(output_dir, ENTRY_NAME)
     shutil.copyfile(source, destination)
-    print(f"wrote {destination} ({os.path.getsize(destination)} bytes)")
+    source_hash = _sha256(source)
+    destination_hash = _sha256(destination)
+    if source_hash != destination_hash:
+        print(f"ERROR: {destination} does not match {source} "
+              f"({destination_hash} != {source_hash})", file=sys.stderr)
+        return 1
+    print(f"wrote {destination} ({os.path.getsize(destination)} bytes, "
+          f"sha256 {destination_hash[:16]}...)")
     return 0
 
 
